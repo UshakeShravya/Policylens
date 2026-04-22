@@ -3,6 +3,7 @@ import os
 import tempfile
 
 import pandas as pd
+import plotly.graph_objects as go
 import streamlit as st
 
 from src.parser import extract_text_from_pdf
@@ -27,6 +28,20 @@ _VERDICT_COLORS: dict[str, str] = {
     "Unsupported":              "background-color: #ffd6b3; color: #bf360c; font-weight: bold",
     "Partially Supported":      "background-color: #fff9c4; color: #f57f17; font-weight: bold",
     "Supported":                "background-color: #c8e6c9; color: #1b5e20; font-weight: bold",
+}
+
+_VERDICT_HEX: dict[str, str] = {
+    "Supported":                "#2ecc71",
+    "Partially Supported":      "#f1c40f",
+    "Unsupported":              "#e67e22",
+    "High-Risk Silent Failure": "#ff4b4b",
+}
+
+_VERDICT_PRIORITY: dict[str, int] = {
+    "High-Risk Silent Failure": 4,
+    "Unsupported":              3,
+    "Partially Supported":      2,
+    "Supported":                1,
 }
 
 _DISPLAY_COLS = {
@@ -120,6 +135,130 @@ def _run_pipeline(source_path: str, summary_text: str):
 
 
 # ---------------------------------------------------------------------------
+# Chart helpers
+# ---------------------------------------------------------------------------
+
+def _render_charts(report: dict) -> None:
+    """Render the three plotly visualisations below the summary metrics."""
+    total  = report["total_claims"]
+    counts = report["verdict_counts"]
+
+    # ── 1. Confidence Gauge ────────────────────────────────────────────────
+    trust_score = (
+        (counts["Supported"] * 1.0 + counts["Partially Supported"] * 0.5)
+        / total * 100
+    ) if total else 0.0
+
+    fig_gauge = go.Figure(go.Indicator(
+        mode="gauge+number+delta",
+        value=round(trust_score, 1),
+        title={"text": "Document Trust Score", "font": {"size": 15, "color": "#e8eaf0"}},
+        number={"suffix": "%", "font": {"size": 34, "color": "#e8eaf0"}},
+        delta={
+            "reference": 80,
+            "increasing": {"color": "#2ecc71"},
+            "decreasing": {"color": "#ff4b4b"},
+        },
+        gauge={
+            "axis": {
+                "range": [0, 100],
+                "tickcolor": "#8b90a8",
+                "tickfont": {"color": "#8b90a8"},
+            },
+            "bar": {"color": "#e8eaf0", "thickness": 0.22},
+            "bgcolor": "#0f1117",
+            "steps": [
+                {"range": [0,  30],  "color": "rgba(255,75,75,0.22)"},
+                {"range": [30, 60],  "color": "rgba(241,196,15,0.18)"},
+                {"range": [60, 80],  "color": "rgba(230,126,34,0.18)"},
+                {"range": [80, 100], "color": "rgba(46,204,113,0.20)"},
+            ],
+        },
+    ))
+    fig_gauge.update_layout(
+        paper_bgcolor="#1a1d27",
+        height=290,
+        margin=dict(l=30, r=30, t=30, b=10),
+    )
+
+    # ── 2. Verdict Distribution (horizontal bar) ───────────────────────────
+    _ordered = ["Supported", "Partially Supported", "Unsupported", "High-Risk Silent Failure"]
+    fig_bar = go.Figure(go.Bar(
+        x=[counts[v] for v in _ordered],
+        y=_ordered,
+        orientation="h",
+        marker_color=[_VERDICT_HEX[v] for v in _ordered],
+        text=[counts[v] for v in _ordered],
+        textposition="outside",
+        textfont={"color": "#e8eaf0"},
+        cliponaxis=False,
+    ))
+    fig_bar.update_layout(
+        title={"text": "Verdict Distribution", "font": {"color": "#e8eaf0", "size": 15}},
+        paper_bgcolor="#1a1d27",
+        plot_bgcolor="#1a1d27",
+        font={"color": "#e8eaf0"},
+        height=290,
+        margin=dict(l=20, r=50, t=50, b=20),
+        xaxis=dict(showgrid=False, zeroline=False, visible=False),
+        yaxis=dict(showgrid=False, tickfont={"size": 11}),
+    )
+
+    col_gauge, col_bar = st.columns([1, 1])
+    with col_gauge:
+        st.plotly_chart(fig_gauge, use_container_width=True)
+    with col_bar:
+        st.plotly_chart(fig_bar, use_container_width=True)
+
+    # ── 3. Claims Flagged per Page (vertical bar, coloured by worst verdict) ──
+    df_summary = pd.DataFrame(report["summary_table"])
+    if df_summary.empty or "page_number" not in df_summary.columns:
+        return
+
+    page_stats = (
+        df_summary.groupby("page_number")["verdict"]
+        .agg(
+            count="count",
+            worst=lambda s: max(s, key=lambda v: _VERDICT_PRIORITY.get(v, 0)),
+        )
+        .reset_index()
+        .sort_values("page_number")
+    )
+
+    fig_heat = go.Figure(go.Bar(
+        x=[f"Page {p}" for p in page_stats["page_number"]],
+        y=page_stats["count"],
+        marker_color=[_VERDICT_HEX[v] for v in page_stats["worst"]],
+        text=page_stats["count"],
+        textposition="auto",
+        textfont={"color": "#ffffff"},
+        showlegend=False,
+    ))
+    fig_heat.update_layout(
+        title={"text": "Claims Flagged per Page", "font": {"color": "#e8eaf0", "size": 15}},
+        paper_bgcolor="#1a1d27",
+        plot_bgcolor="#1a1d27",
+        font={"color": "#e8eaf0"},
+        height=310,
+        margin=dict(l=20, r=20, t=50, b=40),
+        xaxis=dict(
+            title="Page",
+            showgrid=False,
+            tickfont={"color": "#e8eaf0"},
+        ),
+        yaxis=dict(
+            title="Claims",
+            showgrid=True,
+            gridcolor="#2a2d3a",
+            tickfont={"color": "#e8eaf0"},
+            dtick=1,
+        ),
+        bargap=0.35,
+    )
+    st.plotly_chart(fig_heat, use_container_width=True)
+
+
+# ---------------------------------------------------------------------------
 # Results renderer (shared between fresh run and cached state)
 # ---------------------------------------------------------------------------
 
@@ -149,6 +288,9 @@ def _display_results(report: dict) -> None:
         )
     with c4:
         st.metric("Supported", counts["Supported"])
+
+    # — Charts —
+    _render_charts(report)
 
     # — Results table —
     st.markdown("### Verification Results")

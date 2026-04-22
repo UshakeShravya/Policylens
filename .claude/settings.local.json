@@ -5,7 +5,11 @@
       "Bash(git check-ignore *)",
       "Skill(claude-api)",
       "Bash(chmod +x *)",
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git push *)",
+      "Bash(python3 -c ' *)",
+      "Bash(python3 *)"
     ]
   }
 }
