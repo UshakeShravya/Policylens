@@ -1,0 +1,9 @@
+pdfplumber
+sentence-transformers
+faiss-cpu
+anthropic
+streamlit
+spacy
+pandas
+numpy
+python-dotenv
