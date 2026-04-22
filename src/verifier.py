@@ -238,15 +238,16 @@ def verify_claim(claim: dict, evidence: list[dict]) -> dict:
         final_verdict = max(verdicts, key=lambda v: VERDICT_PRIORITY[v])
 
     return {
-        "claim_id": claim["claim_id"],
-        "claim_text": claim["text"],
-        "page_number": claim["page_number"],
-        "flags": claim["flags"],
-        "evidence": evidence,
-        "verdict": final_verdict,
+        "claim_id":         claim["claim_id"],
+        "claim_text":       claim["text"],
+        "page_number":      claim["page_number"],
+        "flags":            claim["flags"],
+        "evidence":         evidence,
+        "verdict":          final_verdict,
         "risk_explanation": " ".join(explanations),
-        "rules_triggered": rules_triggered,
+        "rules_triggered":  rules_triggered,
         "confidence_score": _compute_confidence(final_verdict, top_score),
+        "detection_method": claim.get("detection_method", "regex"),
     }
 
 

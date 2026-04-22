@@ -7,7 +7,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from src.parser import extract_text_from_pdf
-from src.claim_extractor import extract_claims
+from src.claim_extractor import extract_claims, extract_claims_full
 from src.retriever import chunk_pages, build_index
 from src.verifier import verify_claims
 from src.reporter import generate_report, report_to_dataframe
@@ -45,13 +45,14 @@ _VERDICT_PRIORITY: dict[str, int] = {
 }
 
 _DISPLAY_COLS = {
-    "claim_id":        "ID",
-    "page_number":     "Page",
-    "verdict":         "Verdict",
-    "confidence_score":"Confidence",
-    "claim_text":      "Claim",
-    "top_evidence":    "Top Evidence",
-    "risk_explanation":"Explanation",
+    "claim_id":          "ID",
+    "page_number":       "Page",
+    "verdict":           "Verdict",
+    "confidence_score":  "Confidence",
+    "detection_method":  "Method",
+    "claim_text":        "Claim",
+    "top_evidence":      "Top Evidence",
+    "risk_explanation":  "Explanation",
 }
 
 
@@ -79,7 +80,7 @@ def _style_dataframe(df: pd.DataFrame):
         return display.style.applymap(_color_verdict, subset=["Verdict"])
 
 
-def _run_pipeline(source_path: str, summary_text: str):
+def _run_pipeline(source_path: str, summary_text: str, multimodal: bool = False):
     """
     Execute the full PolicyLens pipeline with a live progress bar.
     Returns (results, report) on success, (None, None) on any failure.
@@ -104,7 +105,11 @@ def _run_pipeline(source_path: str, summary_text: str):
             claim_pages = pages
             source_label = "the source document (no summary provided)"
 
-        claims = extract_claims(claim_pages)
+        if multimodal:
+            bar.progress(25, text="Extracting claims (text + visual)...")
+            claims = extract_claims_full(source_path, claim_pages)
+        else:
+            claims = extract_claims(claim_pages)
         if not claims:
             st.warning(
                 f"No verifiable claims found in {source_label}. "
@@ -360,6 +365,15 @@ def show_audit() -> None:
             type=["pdf"],
             key="source_pdf",
         )
+        multimodal = st.checkbox(
+            "Enable multimodal extraction (charts & graphs)",
+            value=False,
+            key="multimodal",
+            help=(
+                "Uses Claude vision to extract claims from charts, tables "
+                "and graphs in addition to text. Slower but more thorough."
+            ),
+        )
 
         st.header("AI Summary to Verify")
         summary_text = st.text_area(
@@ -407,7 +421,7 @@ def show_audit() -> None:
                 final_summary = summary_text
 
             try:
-                results, report = _run_pipeline(source_path, final_summary)
+                results, report = _run_pipeline(source_path, final_summary, multimodal)
                 if results is not None:
                     st.session_state.results = results
                     st.session_state.report = report
@@ -498,7 +512,7 @@ Target for the MVP: < 5 %
 
 ### Source Code
 
-[GitHub Repository](https://github.com/yourusername/policylens) *(placeholder)*
+[GitHub Repository](https://github.com/UshakeShravya/Policylens)
 """)
 
 

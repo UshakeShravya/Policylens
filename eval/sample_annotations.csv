@@ -3,3 +3,14 @@ claim_id,claim_text,true_verdict
 2,"The agency allocated $2.3 billion to clean water initiatives, resulting in improved water quality across all 50 states.",High-Risk Silent Failure
 3,"Administrator Wheeler announced that air pollution levels dropped to their lowest point in recorded history.",Partially Supported
 4,"The Superfund program cleaned up 152 sites, eliminating all contamination risks.",Unsupported
+5,"The FY2022 budget proposes $6 trillion in total new spending, the largest single-year budget request in American history.",High-Risk Silent Failure
+6,"The administration's budget invests in expanding access to affordable health care and reducing prescription drug costs.",Supported
+7,"The proposal directs federal agencies to center equity in all grant programs and contracting decisions.",Partially Supported
+8,"The budget eliminates the Small Business Administration and transfers its programs to the Treasury Department.",Unsupported
+9,"The President's budget proposes increased funding for clean energy research and development programs.",Supported
+10,"Federal job training programs would be consolidated and expanded to serve 2 million additional workers annually.",Partially Supported
+11,"The budget projects a reduction of $3.2 trillion in the national deficit over the next decade through new corporate tax revenues.",High-Risk Silent Failure
+12,"The budget includes dedicated resources to modernize federal information technology infrastructure and improve cybersecurity.",Supported
+13,"The administration's investment in broadband infrastructure would connect every American household to high-speed internet by 2024.",Partially Supported
+14,"All private sector employers with federal contracts would be required to provide 12 weeks of paid family leave starting in 2022.",Unsupported
+15,"The Environmental Protection Agency received additional appropriations to strengthen environmental enforcement and monitoring activities.",Supported

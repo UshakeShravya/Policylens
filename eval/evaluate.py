@@ -12,6 +12,7 @@ from collections import Counter
 from pathlib import Path
 
 import pandas as pd
+from sklearn.metrics import cohen_kappa_score
 
 ALL_VERDICTS = [
     "Supported",
@@ -81,28 +82,17 @@ def load_results(json_path: str) -> pd.DataFrame:
 
 def _cohen_kappa(y_true: list, y_pred: list) -> float:
     """
-    Compute Cohen's Kappa for multi-class classification.
+    Compute Cohen's Kappa for multi-class classification using scikit-learn.
 
-    κ = (po − pe) / (1 − pe)
-    where po = observed agreement, pe = expected agreement by chance.
+    Returns 0.0 for empty inputs or when all predictions are identical
+    (degenerate case where sklearn raises a warning).
     """
-    n = len(y_true)
-    if n == 0:
+    if not y_true:
         return 0.0
-
-    true_counts = Counter(y_true)
-    pred_counts = Counter(y_pred)
-
-    po = sum(1 for t, p in zip(y_true, y_pred) if t == p) / n
-
-    pe = sum(
-        (true_counts.get(label, 0) / n) * (pred_counts.get(label, 0) / n)
-        for label in ALL_VERDICTS
-    )
-
-    if abs(1.0 - pe) < 1e-10:
-        return 1.0
-    return round((po - pe) / (1.0 - pe), 4)
+    try:
+        return round(float(cohen_kappa_score(y_true, y_pred, labels=ALL_VERDICTS)), 4)
+    except ValueError:
+        return 0.0
 
 
 def compute_metrics(annotations_df: pd.DataFrame, results_df: pd.DataFrame) -> dict:

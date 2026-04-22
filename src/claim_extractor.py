@@ -1,3 +1,5 @@
+import base64
+import io
 import json
 import os
 import re
@@ -329,6 +331,193 @@ def extract_claims_with_llm(pages: list[dict]) -> list[dict]:
     return merged
 
 
+_MULTIMODAL_SYSTEM_PROMPT = (
+    "You are a policy document auditor analyzing a page image. Extract all "
+    "verifiable factual claims you can see in charts, graphs, tables, and text. "
+    "Focus on: specific numbers or percentages shown in charts, trends shown "
+    "in graphs, data shown in tables, causal statements. Return ONLY a JSON "
+    "array of objects with fields: text (the claim), source (chart/graph/table/text), "
+    "flags (array of: numeric, causal_verb, named_entity, superlative), "
+    "page_number (int). Return only JSON, no other text."
+)
+
+
+def extract_claims_from_images(pdf_path: str) -> list[dict]:
+    """
+    Extract verifiable factual claims from a PDF by sending each page as a
+    JPEG image to the Claude API (vision).
+
+    Catches claims embedded in charts, graphs, tables, and figures that
+    text-only extraction cannot reach.
+
+    Parameters
+    ----------
+    pdf_path : str
+        Path to the source PDF file.
+
+    Returns
+    -------
+    list[dict]
+        Claims with detection_method "multimodal".  Each dict has:
+        claim_id, text, page_number, flags, raw_entities (empty),
+        source (chart/graph/table/text), detection_method.
+
+    Returns an empty list (with a warning) if the API key is missing,
+    pdf2image is not installed, or pdf2image cannot open the file.
+    """
+    try:
+        import anthropic
+    except ImportError:
+        warnings.warn(
+            "anthropic package not installed — multimodal extraction unavailable.",
+            stacklevel=2,
+        )
+        return []
+
+    try:
+        from pdf2image import convert_from_path
+    except ImportError:
+        warnings.warn(
+            "pdf2image not installed — multimodal extraction unavailable. "
+            "Install with: pip install pdf2image",
+            stacklevel=2,
+        )
+        return []
+
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except ImportError:
+        pass
+
+    api_key = os.getenv("ANTHROPIC_API_KEY")
+    if not api_key:
+        warnings.warn(
+            "ANTHROPIC_API_KEY not set — multimodal extraction unavailable.",
+            stacklevel=2,
+        )
+        return []
+
+    try:
+        images = convert_from_path(pdf_path)
+    except Exception as exc:
+        warnings.warn(f"pdf2image could not convert {pdf_path!r}: {exc}", stacklevel=2)
+        return []
+
+    client = anthropic.Anthropic(api_key=api_key)
+    all_claims: list[dict] = []
+    claim_id = 1
+
+    for page_num, img in enumerate(images, start=1):
+        # Encode page image as base64 JPEG
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=85)
+        b64_data = base64.b64encode(buf.getvalue()).decode("utf-8")
+
+        try:
+            response = client.messages.create(
+                model="claude-sonnet-4-20250514",
+                max_tokens=1024,
+                system=_MULTIMODAL_SYSTEM_PROMPT,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": "image/jpeg",
+                                    "data": b64_data,
+                                },
+                            },
+                            {
+                                "type": "text",
+                                "text": (
+                                    f"Extract all verifiable factual claims from page {page_num}."
+                                ),
+                            },
+                        ],
+                    }
+                ],
+            )
+            items = _parse_llm_json(response.content[0].text)
+        except Exception as exc:
+            warnings.warn(
+                f"Multimodal extraction failed for page {page_num}: {exc}. Skipping.",
+                stacklevel=2,
+            )
+            continue
+
+        for item in items:
+            text = item.get("text", "").strip()
+            if not text or len(text.split()) < 5:
+                continue
+            all_claims.append({
+                "claim_id":        claim_id,
+                "text":            text,
+                "page_number":     item.get("page_number", page_num),
+                "flags":           item.get("flags", []),
+                "raw_entities":    [],
+                "source":          item.get("source", "text"),
+                "detection_method": "multimodal",
+            })
+            claim_id += 1
+
+    return all_claims
+
+
+def extract_claims_full(pdf_path: str, pages: list[dict]) -> list[dict]:
+    """
+    Run both LLM-assisted text extraction and multimodal image extraction,
+    then merge and deduplicate results.
+
+    Parameters
+    ----------
+    pdf_path : str
+        Path to the source PDF — used for image conversion.
+    pages : list[dict]
+        Output of parser.extract_text_from_pdf — used for text extraction.
+
+    Returns
+    -------
+    list[dict]
+        Merged claim list.  detection_method values:
+        "regex", "llm", "both", or "multimodal".
+        Claims found by both text and image passes are marked "both".
+    """
+    llm_claims   = extract_claims_with_llm(pages)
+    image_claims = extract_claims_from_images(pdf_path)
+
+    if not image_claims:
+        return llm_claims
+    if not llm_claims:
+        for i, c in enumerate(image_claims, start=1):
+            c["claim_id"] = i
+        return image_claims
+
+    # Deduplicate: mark LLM claims confirmed by multimodal, collect image-only
+    matched_image_ids: set[int] = set()
+    for img_claim in image_claims:
+        for llm_claim in llm_claims:
+            if _are_duplicate(img_claim["text"], llm_claim["text"]):
+                llm_claim["detection_method"] = "both"
+                matched_image_ids.add(img_claim["claim_id"])
+                break
+
+    next_id = max(c["claim_id"] for c in llm_claims) + 1
+    image_only = []
+    for img_claim in image_claims:
+        if img_claim["claim_id"] not in matched_image_ids:
+            img_claim["claim_id"] = next_id
+            next_id += 1
+            image_only.append(img_claim)
+
+    merged = llm_claims + image_only
+    merged.sort(key=lambda c: (c["page_number"], c["claim_id"]))
+    return merged
+
+
 if __name__ == "__main__":
     sample_pages = [
         {
@@ -380,3 +569,17 @@ if __name__ == "__main__":
     # --- Pass 2: LLM-assisted (falls back gracefully if key missing) ---
     llm_results = extract_claims_with_llm(sample_pages)
     _print_claims(llm_results, "LLM-assisted pass (regex + Claude)")
+
+    print("\n" + "=" * 60)
+    print("  Multimodal extraction (extract_claims_from_images)")
+    print("=" * 60)
+    print("  Requires: pdf2image, ANTHROPIC_API_KEY, and a real PDF path.")
+    print("  Usage:")
+    print("    from src.claim_extractor import extract_claims_from_images")
+    print("    claims = extract_claims_from_images('path/to/document.pdf')")
+    print()
+    print("  Combined text + image pass (extract_claims_full):")
+    print("    from src.claim_extractor import extract_claims_full")
+    print("    claims = extract_claims_full('path/to/document.pdf', pages)")
+    print("  detection_method values: 'regex' | 'llm' | 'multimodal' | 'both'")
+    print()

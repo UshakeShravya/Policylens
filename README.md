@@ -60,6 +60,10 @@ cd policylens
 python -m venv venv
 source venv/bin/activate  # Windows: venv\Scripts\activate
 pip install -r requirements.txt
+# macOS
+brew install poppler
+# Ubuntu/Debian
+sudo apt-get install poppler-utils
 python -m spacy download en_core_web_sm
 ```
 

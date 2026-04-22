@@ -79,12 +79,13 @@ def generate_report(results: list[dict]) -> dict:
             top_evidence = _trunc(r["evidence"][0]["text"], 150)
 
         summary_table.append({
-            "claim_id": r["claim_id"],
-            "claim_text": _trunc(r["claim_text"], 100),
-            "page_number": r["page_number"],
-            "verdict": r["verdict"],
+            "claim_id":         r["claim_id"],
+            "claim_text":       _trunc(r["claim_text"], 100),
+            "page_number":      r["page_number"],
+            "verdict":          r["verdict"],
             "confidence_score": r["confidence_score"],
-            "top_evidence": top_evidence,
+            "detection_method": r.get("detection_method", "regex"),
+            "top_evidence":     top_evidence,
             "risk_explanation": r["risk_explanation"],
         })
 
