@@ -55,7 +55,7 @@ policylens/
 ### Installation
 
 ```bash
-git clone https://github.com/yourusername/policylens.git
+git clone https://github.com/UshakeShravya/Policylens.git
 cd policylens
 python -m venv venv
 source venv/bin/activate  # Windows: venv\Scripts\activate
