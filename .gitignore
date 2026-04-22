@@ -24,3 +24,4 @@ venv/
 # PDFs — keep .gitkeep placeholders, skip actual documents
 *.pdf
 !data/sample/*.pdf
+data/sample/*.pdf
