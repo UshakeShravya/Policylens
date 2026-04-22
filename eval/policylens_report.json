@@ -1,0 +1,89 @@
+{
+  "total_claims": 4,
+  "verdict_counts": {
+    "Supported": 1,
+    "Partially Supported": 2,
+    "Unsupported": 0,
+    "High-Risk Silent Failure": 1
+  },
+  "silent_failure_rate": 0.25,
+  "unsupported_rate": 0.0,
+  "high_risk_claims": [
+    {
+      "claim_id": 2,
+      "claim_text": "The agency allocated $2.3 billion to clean water initiatives, resulting in improved water quality across all 50 states.",
+      "page_number": 1,
+      "flags": [
+        "numeric",
+        "causal_verb",
+        "superlative",
+        "named_entity"
+      ],
+      "evidence": [
+        {
+          "chunk_id": 16,
+          "text": "• Empower communities to leverage EPA water infrastructure investments. By\nSeptember 30, 2021, EPA will increase by $16 billion the non-federal dollars leveraged by\nthe EPA water infrastructure finance programs (Clean Water State Revolving Fund\n1 For example, (PM FIFRA1) Number of FIFRA decisions completed through pesticides registration review; and\n(PM CF2) Number of Agency administrative subsystems.",
+          "page_number": 3,
+          "similarity_score": 0.6371893286705017
+        },
+        {
+          "chunk_id": 73,
+          "text": "Non-Federal Dollars (Cumulative, in Billions) Leveraged by EPA • Reduced the number of square miles of watershed areas that contained impaired\nWater Infrastructure Finance Programs, Sep 2018 -Sep 2020 waters in 2019 by over 13,000 square miles.\n•",
+          "page_number": 12,
+          "similarity_score": 0.6326186060905457
+        },
+        {
+          "chunk_id": 68,
+          "text": "GOAL 1: A Cleaner, Healthier Environment\nObjective 1.2 – Provide for Clean and Safe Water: Ensure waters are clean through improved water infrastructure and, in partnership with\nstates and tribes, sustainably manage programs to support drinking water, aquatic ecosystems, and recreational, economic, and subsistence\nactivities. Summary of progress toward strategic objective:\nPerformance toward target over time\n• Finalized the Navigable Waters Protection Rule, Clean Water Act (CWA) Section\nNumber of measures by percent of target achieved\n401 Water Quality Certification Rule, and Steam Electric Reconsideration Rule.",
+          "page_number": 12,
+          "similarity_score": 0.6297395825386047
+        }
+      ],
+      "verdict": "High-Risk Silent Failure",
+      "risk_explanation": "Claim contains specific value(s) [2300000000.0, 50.0] not found within ±10% in retrieved evidence. Claim asserts causation but evidence only describes general trends without any causal attribution.",
+      "rules_triggered": [
+        "numeric_match",
+        "causal_scrutiny"
+      ],
+      "confidence_score": 0.0765
+    }
+  ],
+  "summary_table": [
+    {
+      "claim_id": 1,
+      "claim_text": "The EPA reduced carbon emissions by 47% in 2020.",
+      "page_number": 1,
+      "verdict": "Partially Supported",
+      "confidence_score": 0.3053,
+      "top_evidence": "gallon MY 2017. • Issued annual greenhouse gas (GHG) emissions report showing that since 2005, national\nnet GHG emissions (including sinks) have fa...",
+      "risk_explanation": "Claim asserts causation but evidence only describes general trends without any causal attribution."
+    },
+    {
+      "claim_id": 2,
+      "claim_text": "The agency allocated $2.3 billion to clean water initiatives, resulting in improved water quality...",
+      "page_number": 1,
+      "verdict": "High-Risk Silent Failure",
+      "confidence_score": 0.0765,
+      "top_evidence": "• Empower communities to leverage EPA water infrastructure investments. By\nSeptember 30, 2021, EPA will increase by $16 billion the non-federal dol...",
+      "risk_explanation": "Claim contains specific value(s) [2300000000.0, 50.0] not found within ±10% in retrieved evidence. Claim asserts causation but evidence only describes general trends without any causal attribution."
+    },
+    {
+      "claim_id": 3,
+      "claim_text": "Administrator Wheeler announced that air pollution levels dropped to their lowest point in record...",
+      "page_number": 1,
+      "verdict": "Partially Supported",
+      "confidence_score": 0.2116,
+      "top_evidence": "• Improve air quality by reducing the number of areas not meeting air quality\nstandards. By September 30, 2021, EPA, in close collaboration with st...",
+      "risk_explanation": "Key entities from claim absent in evidence: 'Wheeler'."
+    },
+    {
+      "claim_id": 4,
+      "claim_text": "The Superfund program cleaned up 152 sites, eliminating all contamination risks.",
+      "page_number": 1,
+      "verdict": "Supported",
+      "confidence_score": 0.638,
+      "top_evidence": "Results reflect a net accomplishment as sites can shift between human exposure under control to\nhuman exposure not under control or human exposure ...",
+      "risk_explanation": "All verification rules passed — claim is grounded in evidence."
+    }
+  ]
+}

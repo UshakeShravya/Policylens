@@ -1,0 +1,5 @@
+claim_id,claim_text,true_verdict
+1,"The EPA reduced carbon emissions by 47% in 2020.",High-Risk Silent Failure
+2,"The agency allocated $2.3 billion to clean water initiatives, resulting in improved water quality across all 50 states.",High-Risk Silent Failure
+3,"Administrator Wheeler announced that air pollution levels dropped to their lowest point in recorded history.",Partially Supported
+4,"The Superfund program cleaned up 152 sites, eliminating all contamination risks.",Unsupported
