@@ -80,9 +80,16 @@ def _embed(texts: list[str]) -> np.ndarray:
     return embeddings
 
 
-def build_index(chunks: list[dict]) -> tuple[faiss.Index, list[dict]]:
+def build_index(
+    chunks: list[dict],
+    pdf_path: str | None = None,
+) -> tuple[faiss.Index, list[dict]]:
     """
     Embed all chunks and build a FAISS IndexFlatIP for cosine similarity search.
+
+    If pdf_path is provided the result is persisted to (and loaded from) the
+    persistent cache at ~/.policylens_cache/{md5}/.  Subsequent calls with the
+    same PDF skip embedding entirely.
 
     Cosine similarity is computed as inner product over L2-normalised vectors,
     which avoids the overhead of IndexFlatL2 + distance conversion.
@@ -91,18 +98,38 @@ def build_index(chunks: list[dict]) -> tuple[faiss.Index, list[dict]]:
     ----------
     chunks : list[dict]
         Output of chunk_pages.
+    pdf_path : str | None
+        Path to the source PDF, used as cache key.  Pass None to skip caching.
 
     Returns
     -------
     (faiss.Index, list[dict])
         The FAISS index and the original chunks list (index positions align).
     """
+    if pdf_path is not None:
+        try:
+            from src.index_store import load_index, save_index
+            cached = load_index(pdf_path)
+            if cached is not None:
+                print("[CACHE] Loaded index from cache", flush=True)
+                return cached
+        except Exception:
+            pass  # cache miss or import error — fall through to rebuild
+
     texts = [c["text"] for c in chunks]
     embeddings = _embed(texts)
 
     dim = embeddings.shape[1]
     index = faiss.IndexFlatIP(dim)
     index.add(embeddings)
+
+    if pdf_path is not None:
+        try:
+            from src.index_store import save_index
+            save_index(index, chunks, pdf_path)
+            print("[CACHE] Built and saved new index", flush=True)
+        except Exception:
+            pass  # non-fatal — audit continues without caching
 
     return index, chunks
 

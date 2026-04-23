@@ -12,6 +12,7 @@ from src.claim_extractor import extract_claims_full
 from src.retriever import chunk_pages, build_index
 from src.agent import verify_claims_with_agent
 from src.reporter import generate_report, report_to_dataframe
+from src.index_store import is_cached_upload, is_cached
 
 # Must be the very first Streamlit call
 st.set_page_config(
@@ -107,11 +108,15 @@ def _run_pipeline(source_path: str, summary_text: str):
             source_label = "the source document (no summary provided)"
 
         # 3 — Parallel: multimodal claim extraction + FAISS index build
-        bar.progress(20, text="Extracting claims (text + visual)...")
+        index_msg = (
+            "Loading cached index..." if is_cached(source_path)
+            else "Building retrieval index..."
+        )
+        bar.progress(20, text=f"Extracting claims (text + visual) · {index_msg}")
 
         def _build_index():
             c = chunk_pages(pages, chunk_size=3)
-            return build_index(c)
+            return build_index(c, pdf_path=source_path)
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
             claims_future = pool.submit(extract_claims_full, source_path, claim_pages)
@@ -374,6 +379,12 @@ def show_audit() -> None:
             type=["pdf"],
             key="source_pdf",
         )
+        if source_pdf is not None:
+            _cached = is_cached_upload(source_pdf.getbuffer())
+            if _cached:
+                st.success("Index cached — instant load")
+            else:
+                st.caption("Index will be built on first run")
         st.header("AI Summary to Verify")
         summary_text = st.text_area(
             "Paste an AI-generated summary",

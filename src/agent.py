@@ -21,6 +21,9 @@ import warnings
 _MODEL = "claude-sonnet-4-6"
 _MAX_TURNS = 6
 
+# Only these verdicts warrant the extra cost of a full agent loop.
+_ESCALATION_VERDICTS = {"High-Risk Silent Failure", "Unsupported"}
+
 
 def _log(msg: str) -> None:
     """Write a timestamped agent debug line to stderr (always visible in the terminal)."""
@@ -324,13 +327,18 @@ def _build_verdict(
     claim: dict,
     index,
     chunks: list[dict],
+    base: dict | None = None,
 ) -> dict:
-    """Merge an agent JSON result with the deterministic base verdict."""
-    from src.retriever import retrieve_evidence
-    from src.verifier import verify_claim
+    """Merge an agent JSON result with the deterministic base verdict.
 
-    evidence = retrieve_evidence(claim["text"], index, chunks, top_k=3)
-    base = verify_claim(claim, evidence)
+    If base is supplied (already computed by the caller) it is reused directly,
+    avoiding a redundant retrieve + verify pass.
+    """
+    if base is None:
+        from src.retriever import retrieve_evidence
+        from src.verifier import verify_claim
+        evidence = retrieve_evidence(claim["text"], index, chunks, top_k=3)
+        base = verify_claim(claim, evidence)
 
     valid_verdicts = {
         "Supported",
@@ -367,19 +375,30 @@ def verify_claim_with_agent(claim: dict, index, chunks: list[dict]) -> dict:
     """
     Verify a single claim using the Claude agent loop.
 
+    The deterministic engine runs first.  If its verdict is "Supported" or
+    "Partially Supported" the result is returned immediately — no API call is
+    made.  Only "High-Risk Silent Failure" and "Unsupported" verdicts escalate
+    to the full agent loop.
+
     Returns a verdict dict identical to verifier.verify_claim but with two
     extra fields:
       agent_notes      : str — Claude's nuanced observations
-      detection_method : original value suffixed with "+agent"
+      detection_method : original value suffixed with "+agent" (escalated only)
 
     Falls back to the deterministic engine (with a visible error line on stderr)
     if ANTHROPIC_API_KEY is not set, the package is missing, or the API fails.
     """
+    base = _deterministic_fallback(claim, index, chunks)
+
+    if base["verdict"] not in _ESCALATION_VERDICTS:
+        _log(f"claim={claim['claim_id']} verdict={base['verdict']} — skipping agent")
+        return base
+
     try:
         import anthropic
     except ImportError:
         _log("anthropic package not installed — deterministic fallback")
-        return _deterministic_fallback(claim, index, chunks)
+        return base
 
     try:
         from dotenv import load_dotenv
@@ -390,24 +409,22 @@ def verify_claim_with_agent(claim: dict, index, chunks: list[dict]) -> dict:
     api_key = os.getenv("ANTHROPIC_API_KEY")
     if not api_key:
         _log("ANTHROPIC_API_KEY not set — deterministic fallback")
-        return _deterministic_fallback(claim, index, chunks)
+        return base
 
     client = anthropic.Anthropic(api_key=api_key)
 
     try:
         agent_result = _run_agent_loop(client, claim, index, chunks)
     except Exception as exc:
-        # Surface the actual error — credit exhaustion, rate limits, network issues
-        # all appear here and were previously invisible.
         _log(f"claim={claim['claim_id']} API error ({type(exc).__name__}): {exc}")
-        return _deterministic_fallback(claim, index, chunks)
+        return base
 
     if agent_result is None:
         _log(f"claim={claim['claim_id']} loop returned no verdict — deterministic fallback")
-        return _deterministic_fallback(claim, index, chunks)
+        return base
 
     _log(f"claim={claim['claim_id']} agent verdict={agent_result.get('verdict')} confidence={agent_result.get('confidence_score')}")
-    return _build_verdict(agent_result, claim, index, chunks)
+    return _build_verdict(agent_result, claim, index, chunks, base=base)
 
 
 def verify_claims_with_agent(
@@ -416,15 +433,36 @@ def verify_claims_with_agent(
     chunks: list[dict],
 ) -> list[dict]:
     """
-    Run agent-based verification for a list of claims in parallel (max 3 workers).
+    Run agent-based verification for a list of claims.
+
+    All claims are first evaluated by the deterministic engine.  Only claims
+    whose deterministic verdict is "High-Risk Silent Failure" or "Unsupported"
+    are escalated to the Claude agent loop (up to 3 in parallel).  All other
+    claims are returned immediately with their deterministic result, keeping
+    API usage proportional to actual risk.
+
     Drop-in replacement for verifier.verify_claims; preserves claim order.
-    Falls back to the deterministic engine per-claim on any failure.
     """
+    # Step 1 — deterministic pass for every claim (fast, no API)
+    det_results: list[dict] = [_deterministic_fallback(c, index, chunks) for c in claims]
+
+    # Step 2 — decide which claims need escalation
+    escalate = [i for i, r in enumerate(det_results) if r["verdict"] in _ESCALATION_VERDICTS]
+    skip_count = len(claims) - len(escalate)
+    _log(
+        f"pre-screen: {skip_count}/{len(claims)} claims are Supported/Partially Supported "
+        f"— skipping agent. Escalating {len(escalate)} claim(s)."
+    )
+
+    if not escalate:
+        return det_results
+
+    # Step 3 — check API availability before spawning threads
     try:
         import anthropic
     except ImportError:
-        _log("anthropic package not installed — deterministic fallback for all claims")
-        return [_deterministic_fallback(c, index, chunks) for c in claims]
+        _log("anthropic package not installed — deterministic only")
+        return det_results
 
     try:
         from dotenv import load_dotenv
@@ -434,39 +472,40 @@ def verify_claims_with_agent(
 
     api_key = os.getenv("ANTHROPIC_API_KEY")
     if not api_key:
-        _log("ANTHROPIC_API_KEY not set — deterministic fallback for all claims")
-        return [_deterministic_fallback(c, index, chunks) for c in claims]
+        _log("ANTHROPIC_API_KEY not set — deterministic only")
+        return det_results
 
     client = anthropic.Anthropic(api_key=api_key)
 
-    def _run_one(claim: dict) -> dict:
+    def _run_one(i: int) -> tuple[int, dict]:
+        claim = claims[i]
+        base  = det_results[i]
         try:
             agent_result = _run_agent_loop(client, claim, index, chunks)
         except Exception as exc:
             _log(f"claim={claim['claim_id']} API error ({type(exc).__name__}): {exc}")
-            return _deterministic_fallback(claim, index, chunks)
+            return i, base
 
         if agent_result is None:
-            _log(f"claim={claim['claim_id']} loop returned no verdict — deterministic fallback")
-            return _deterministic_fallback(claim, index, chunks)
+            _log(f"claim={claim['claim_id']} no verdict — keeping deterministic")
+            return i, base
 
         _log(f"claim={claim['claim_id']} agent verdict={agent_result.get('verdict')}")
-        return _build_verdict(agent_result, claim, index, chunks)
+        return i, _build_verdict(agent_result, claim, index, chunks, base=base)
 
-    results: list[dict | None] = [None] * len(claims)
+    results = list(det_results)  # copy; non-escalated slots stay as-is
     with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
-        future_to_idx = {
-            pool.submit(_run_one, claim): i for i, claim in enumerate(claims)
-        }
+        future_to_idx = {pool.submit(_run_one, i): i for i in escalate}
         for future in concurrent.futures.as_completed(future_to_idx):
-            idx = future_to_idx[future]
+            original_i = future_to_idx[future]
             try:
-                results[idx] = future.result()
+                i, result = future.result()
+                results[i] = result
             except Exception as exc:
-                _log(f"claim={claims[idx]['claim_id']} worker failed ({type(exc).__name__}): {exc}")
-                results[idx] = _deterministic_fallback(claims[idx], index, chunks)
+                _log(f"claim={claims[original_i]['claim_id']} worker failed ({type(exc).__name__}): {exc}")
+                # det_results[original_i] already in place — no action needed
 
-    return results  # type: ignore[return-value]
+    return results
 
 
 # ---------------------------------------------------------------------------
