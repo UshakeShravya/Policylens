@@ -637,6 +637,44 @@
       vertical-align: middle;
     }
 
+    /* ── Features ──────────────────────────────────────────── */
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 20px;
+    }
+
+    .feature-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--accent);
+      border-radius: var(--radius);
+      padding: 28px 24px;
+      transition: transform .2s, box-shadow .2s;
+    }
+    .feature-card:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 8px 32px rgba(255,75,75,.12);
+    }
+
+    .feature-icon {
+      font-size: 1.7rem;
+      margin-bottom: 14px;
+      line-height: 1;
+    }
+
+    .feature-title {
+      font-size: 1rem;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+
+    .feature-body {
+      font-size: .875rem;
+      color: var(--muted);
+      line-height: 1.65;
+    }
+
     /* ── Mobile ─────────────────────────────────────────────── */
     @media (max-width: 700px) {
       .nav-links { gap: 14px; }
@@ -665,6 +703,7 @@
     <ul class="nav-links">
       <li><a href="#problem">Problem</a></li>
       <li><a href="#how-it-works">How It Works</a></li>
+      <li><a href="#features">Features</a></li>
       <li><a href="#results">Results</a></li>
       <li><a href="#tech">Tech Stack</a></li>
       <li>
@@ -767,10 +806,10 @@
 <section class="section" id="how-it-works">
   <div class="container">
     <span class="section-label">How It Works</span>
-    <h2 class="section-title">Four steps, zero hallucinations missed</h2>
+    <h2 class="section-title">Five steps, zero hallucinations missed</h2>
     <p class="section-sub">
-      A fully deterministic pipeline — no black-box scoring, every verdict is traceable
-      to a rule and a source passage.
+      Deterministic rules anchored by an AI agent — every verdict is traceable
+      to a rule, a source passage, and optionally a Claude reasoning trace.
     </p>
 
     <div class="steps">
@@ -780,11 +819,13 @@
         <div class="step-body">
           Every sentence in the AI summary is scanned for verifiable assertions:
           numbers, named entities, causal language, and superlatives.
+          Charts and tables are read visually via multimodal extraction.
         </div>
         <div class="step-tech">
           <span class="chip">spaCy NER</span>
           <span class="chip">Regex</span>
           <span class="chip">Claude API</span>
+          <span class="chip">Vision</span>
         </div>
       </div>
 
@@ -792,17 +833,33 @@
         <div class="step-num">2</div>
         <div class="step-title">Retrieve Evidence</div>
         <div class="step-body">
-          The source document is chunked into overlapping 3-sentence windows and
-          embedded. The top-3 most similar passages are retrieved for each claim.
+          The source document is chunked into overlapping 3-sentence windows,
+          embedded, and stored in a persistent FAISS index. Identical PDFs skip
+          re-embedding entirely on subsequent runs.
         </div>
         <div class="step-tech">
           <span class="chip">FAISS</span>
           <span class="chip">sentence-transformers</span>
+          <span class="chip neutral" style="background:rgba(139,144,168,.1);color:var(--muted);border-color:var(--border)">Persistent Cache</span>
         </div>
       </div>
 
       <div class="step">
         <div class="step-num">3</div>
+        <div class="step-title">Agent Orchestration</div>
+        <div class="step-body">
+          For High-Risk and Unsupported claims, a Claude agent autonomously calls
+          retrieval and rule-check tools, reasons over the evidence, and returns a
+          structured verdict — only where the extra cost is warranted.
+        </div>
+        <div class="step-tech">
+          <span class="chip">Claude Tool Use</span>
+          <span class="chip">Smart Escalation</span>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-num">4</div>
         <div class="step-title">Apply Rules</div>
         <div class="step-body">
           Four deterministic rules are applied in priority order: similarity threshold,
@@ -815,16 +872,81 @@
       </div>
 
       <div class="step">
-        <div class="step-num">4</div>
+        <div class="step-num">5</div>
         <div class="step-title">Generate Report</div>
         <div class="step-body">
-          Every claim receives a verdict, a confidence score, the triggering rules,
-          and the exact source passage — full traceability in a JSON report or
-          interactive dashboard.
+          Every claim receives a verdict, confidence score, triggering rules, and
+          the exact source passage — exported as JSON or explored in the interactive
+          dashboard with charts and batch comparison views.
         </div>
         <div class="step-tech">
           <span class="chip">Streamlit</span>
           <span class="chip">JSON</span>
+          <span class="chip">Batch Mode</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ───────────────── FEATURES ───────────────── -->
+<section class="section section--alt" id="features">
+  <div class="container">
+    <span class="section-label">Features</span>
+    <h2 class="section-title">Built for real-world policy auditing</h2>
+    <p class="section-sub">
+      Every feature was added to close a gap between "demo accuracy" and production
+      reliability on complex, multi-hundred-page documents.
+    </p>
+
+    <div class="features-grid">
+      <div class="feature-card">
+        <div class="feature-icon">🖼️</div>
+        <div class="feature-title">Multimodal Extraction</div>
+        <div class="feature-body">
+          Renders each PDF page as an image and passes it to Claude Vision alongside
+          the text layer. Charts, graphs, and embedded tables that text parsers miss
+          are included in claim extraction.
+        </div>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">🤖</div>
+        <div class="feature-title">Agent Orchestration</div>
+        <div class="feature-body">
+          A Claude agent equipped with retrieval and rule-check tools investigates
+          dangerous claims autonomously — calling tools, reasoning over evidence, and
+          returning a structured verdict with full reasoning trace.
+        </div>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">🗂️</div>
+        <div class="feature-title">Batch Processing</div>
+        <div class="feature-body">
+          Audit up to three policy documents simultaneously. The comparison dashboard
+          highlights the riskiest document, totals high-risk failures across the corpus,
+          and lets you download each report individually.
+        </div>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">💾</div>
+        <div class="feature-title">Persistent Cache</div>
+        <div class="feature-body">
+          FAISS indexes are saved to disk keyed by MD5 hash of the PDF. Re-uploading
+          the same document skips embedding entirely — the sidebar shows "Index cached —
+          instant load" before the audit even starts.
+        </div>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">🎯</div>
+        <div class="feature-title">Smart Escalation</div>
+        <div class="feature-body">
+          All claims are pre-screened by the deterministic engine. Only
+          High-Risk Silent Failures and Unsupported claims escalate to the Claude
+          agent loop — keeping API costs proportional to actual risk.
         </div>
       </div>
     </div>
@@ -1017,7 +1139,17 @@
       <div class="stack-card">
         <div class="stack-icon">🤖</div>
         <div class="stack-name">Claude API</div>
-        <div class="stack-role">LLM-assisted extraction</div>
+        <div class="stack-role">LLM-assisted extraction &amp; agent</div>
+      </div>
+      <div class="stack-card">
+        <div class="stack-icon">🖼️</div>
+        <div class="stack-name">pdf2image</div>
+        <div class="stack-role">Multimodal page rendering</div>
+      </div>
+      <div class="stack-card">
+        <div class="stack-icon">⚡</div>
+        <div class="stack-name">concurrent.futures</div>
+        <div class="stack-role">Parallel processing</div>
       </div>
       <div class="stack-card">
         <div class="stack-icon">📊</div>
@@ -1040,6 +1172,7 @@
     <div class="footer-links">
       <a href="#problem">The Problem</a>
       <a href="#how-it-works">How It Works</a>
+      <a href="#features">Features</a>
       <a href="#results">Results</a>
       <a href="#evaluation">Evaluation</a>
       <a
