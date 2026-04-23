@@ -87,6 +87,7 @@ def generate_report(results: list[dict]) -> dict:
             "detection_method": r.get("detection_method", "regex"),
             "top_evidence":     top_evidence,
             "risk_explanation": r["risk_explanation"],
+            "agent_notes":      r.get("agent_notes", ""),
         })
 
     return {

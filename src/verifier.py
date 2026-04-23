@@ -28,6 +28,12 @@ _NUMBER_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Pre-processing patterns for _extract_numbers — mirrors claim_extractor filters
+_LIST_MARKER_RE = re.compile(r"^\d{1,3}\.\s+")
+_FY_YEAR_RE     = re.compile(
+    r"\bFY\s*\d{4}\b|\bfiscal\s+year\s+\d{4}\b", re.IGNORECASE
+)
+
 _MULTIPLIERS: dict[str, float] = {
     "%": 1.0,
     "thousand": 1e3,
@@ -60,9 +66,27 @@ VERDICT_PRIORITY: dict[str, int] = {
 # ---------------------------------------------------------------------------
 
 def _extract_numbers(text: str) -> list[float]:
-    """Return all positive numeric values found in text, multipliers applied."""
+    """Return all positive numeric values found in text, multipliers applied.
+
+    Excludes three categories of false-positive numbers:
+      1. Leading list markers  — "1. " / "2. " at sentence start
+      2. FY / fiscal-year labels — "FY 2022", "fiscal year 2022"
+      3. Digits embedded in compound terms — "19" in "COVID-19", "5"/"1" in "H5N1"
+    """
+    # Strip leading list marker and fiscal-year labels before scanning
+    cleaned = _LIST_MARKER_RE.sub("", text, count=1)
+    cleaned = _FY_YEAR_RE.sub(" ", cleaned)
+
     results: list[float] = []
-    for m in _NUMBER_RE.finditer(text):
+    for m in _NUMBER_RE.finditer(cleaned):
+        start = m.start()
+        # Skip digits that are part of alphanumeric compound terms.
+        # Two cases: alpha immediately before digit (H5N1) or
+        # alpha-hyphen before digit (COVID-19, SARS-CoV-2).
+        if start >= 1 and cleaned[start - 1].isalpha():
+            continue
+        if start >= 2 and cleaned[start - 1] == "-" and cleaned[start - 2].isalpha():
+            continue
         raw = m.group(1).replace(",", "")
         try:
             val = float(raw)

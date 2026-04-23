@@ -1,3 +1,4 @@
+import concurrent.futures
 import json
 import os
 import tempfile
@@ -7,9 +8,9 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from src.parser import extract_text_from_pdf
-from src.claim_extractor import extract_claims, extract_claims_full
+from src.claim_extractor import extract_claims_full
 from src.retriever import chunk_pages, build_index
-from src.verifier import verify_claims
+from src.agent import verify_claims_with_agent
 from src.reporter import generate_report, report_to_dataframe
 
 # Must be the very first Streamlit call
@@ -80,7 +81,7 @@ def _style_dataframe(df: pd.DataFrame):
         return display.style.applymap(_color_verdict, subset=["Verdict"])
 
 
-def _run_pipeline(source_path: str, summary_text: str, multimodal: bool = False):
+def _run_pipeline(source_path: str, summary_text: str):
     """
     Execute the full PolicyLens pipeline with a live progress bar.
     Returns (results, report) on success, (None, None) on any failure.
@@ -95,9 +96,9 @@ def _run_pipeline(source_path: str, summary_text: str, multimodal: bool = False)
                 "The file may be scanned or image-based."
             )
             return None, None
-        bar.progress(20, text=f"Parsed {len(pages)} pages — extracting claims...")
+        bar.progress(15, text=f"Parsed {len(pages)} pages — extracting claims & building index...")
 
-        # 2 — Decide what to extract claims FROM
+        # 2 — Determine claim source
         if summary_text.strip():
             claim_pages = [{"page_number": 1, "text": summary_text}]
             source_label = "the pasted summary"
@@ -105,27 +106,30 @@ def _run_pipeline(source_path: str, summary_text: str, multimodal: bool = False)
             claim_pages = pages
             source_label = "the source document (no summary provided)"
 
-        if multimodal:
-            bar.progress(25, text="Extracting claims (text + visual)...")
-            claims = extract_claims_full(source_path, claim_pages)
-        else:
-            claims = extract_claims(claim_pages)
+        # 3 — Parallel: multimodal claim extraction + FAISS index build
+        bar.progress(20, text="Extracting claims (text + visual)...")
+
+        def _build_index():
+            c = chunk_pages(pages, chunk_size=3)
+            return build_index(c)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+            claims_future = pool.submit(extract_claims_full, source_path, claim_pages)
+            index_future  = pool.submit(_build_index)
+            claims        = claims_future.result()
+            index, chunks = index_future.result()
+
         if not claims:
             st.warning(
                 f"No verifiable claims found in {source_label}. "
                 "Try providing text that contains numbers, named entities, or causal language."
             )
             return None, None
-        bar.progress(40, text=f"Found {len(claims)} claims — building retrieval index...")
+        bar.progress(55, text=f"Found {len(claims)} claims, {len(chunks)} index chunks — verifying claims with agent...")
 
-        # 3 — Build FAISS index over source document
-        chunks = chunk_pages(pages, chunk_size=3)
-        index, chunks = build_index(chunks)
-        bar.progress(65, text=f"Index ready ({len(chunks)} chunks) — verifying claims...")
-
-        # 4 — Verify
-        results = verify_claims(claims, index, chunks)
-        bar.progress(85, text="Verified — generating report...")
+        # 4 — Agent verification (parallel across claims internally)
+        results = verify_claims_with_agent(claims, index, chunks)
+        bar.progress(90, text="Verified — generating report...")
 
         # 5 — Report
         report = generate_report(results)
@@ -339,6 +343,11 @@ def _display_results(report: dict) -> None:
                 )
                 right.markdown(f"**Confidence score:** `{r['confidence_score']:.4f}`")
 
+                agent_notes = r.get("agent_notes", "")
+                if agent_notes:
+                    st.markdown("**Agent notes**")
+                    st.info(agent_notes)
+
     # — Download —
     st.divider()
     st.download_button(
@@ -365,16 +374,6 @@ def show_audit() -> None:
             type=["pdf"],
             key="source_pdf",
         )
-        multimodal = st.checkbox(
-            "Enable multimodal extraction (charts & graphs)",
-            value=False,
-            key="multimodal",
-            help=(
-                "Uses Claude vision to extract claims from charts, tables "
-                "and graphs in addition to text. Slower but more thorough."
-            ),
-        )
-
         st.header("AI Summary to Verify")
         summary_text = st.text_area(
             "Paste an AI-generated summary",
@@ -421,7 +420,8 @@ def show_audit() -> None:
                 final_summary = summary_text
 
             try:
-                results, report = _run_pipeline(source_path, final_summary, multimodal)
+                with st.spinner("Running full audit (multimodal + agent)..."):
+                    results, report = _run_pipeline(source_path, final_summary)
                 if results is not None:
                     st.session_state.results = results
                     st.session_state.report = report

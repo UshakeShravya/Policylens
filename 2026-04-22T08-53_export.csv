@@ -1,0 +1,16 @@
+﻿ID,Page,Verdict,Confidence,Method,Claim,Top Evidence,Explanation
+1,1,Supported,0.7131,regex,The federal budget proposes $6 trillion in total spending for 2022.,"BuDgeT OF The u. S. gOVeRNMeNT FOR FISCAL YeAR 2022 25
+THE IMPACT OF THE PRESIDENT’S POLICIES ON THE NATION’S
+ECONOMIC AND BUDGET OUTLOOK The Budge...",All verification rules passed — claim is grounded in evidence.
+2,1,High-Risk Silent Failure,0.0577,regex,Defense spending will increase by 1.7% to $753 billion.,"In ad- a path to citizenship for undocumented immi-
+dition, to support agencies as they modernize, grants and implement an immigration system
+stren...","Claim contains specific value(s) [1.7, 753000000000.0] not found within ±10% in retrieved evidence. Claim asserts causation but evidence only describes general trends without any causal attribution."
+3,1,High-Risk Silent Failure,0.0739,regex,The budget eliminates the deficit entirely by 2030.,"BuDgeT OF The u. S. gOVeRNMeNT FOR FISCAL YeAR 2022 27
+Over time, the savings from these reforms A Budget that added to long-term deficits would
+wo...",Claim contains specific value(s) [2030.0] not found within ±10% in retrieved evidence.
+4,1,High-Risk Silent Failure,0.0614,regex,Infrastructure investment will create 2 million new jobs annually.,"This more than support additional clean energy, energy storage,
+triples the current annual discretionary fund- and transmission projects in rural c...",Claim contains specific value(s) [2000000.0] not found within ±10% in retrieved evidence.
+5,1,High-Risk Silent Failure,0.0736,regex,Climate initiatives will reduce emissions by 50% before 2025.,"20 BuILDINg BACK BeTTeR
+TACKLING THE CLIMATE CRISIS
+Climate change is one of the greatest chal- the electric sector to be carbon-pollution free by
+...","Claim contains specific value(s) [50.0, 2025.0] not found within ±10% in retrieved evidence. Claim asserts causation but evidence only describes general trends without any causal attribution."

@@ -21,6 +21,25 @@ _NUMERIC_RE = re.compile(
     re.IGNORECASE | re.VERBOSE,
 )
 
+# Strips non-verifiable numbers before the numeric flag check.
+# Order matters: remove FY labels before compound-term digits so that
+# "FY2022" is handled by the first pattern, not the second.
+_LIST_MARKER_RE  = re.compile(r"^\d{1,3}\.\s+")           # "1. ", "12. " at sentence start
+_FY_YEAR_RE      = re.compile(                             # "FY 2022", "fiscal year 2022"
+    r"\bFY\s*\d{4}\b|\bfiscal\s+year\s+\d{4}\b", re.IGNORECASE
+)
+_COMPOUND_NUM_RE = re.compile(                             # COVID-19 → COVID; H5N1 → HN
+    r"(?<=[A-Za-z])-\d+|(?<=[A-Za-z])\d+"
+)
+
+
+def _numeric_check_text(text: str) -> str:
+    """Return text with non-verifiable numbers removed, for flag-only use."""
+    t = _LIST_MARKER_RE.sub("", text, count=1)
+    t = _FY_YEAR_RE.sub(" ", t)
+    t = _COMPOUND_NUM_RE.sub("", t)
+    return t
+
 _CAUSAL_RE = re.compile(
     r"\b(?:caused?|leads?|led\s+to|results?(?:ed)?\s+in|reduced?|increases?|"
     r"increased?|decreased?|improved?|generated?|produced?|triggered?|"
@@ -59,7 +78,7 @@ def _flag_sentence(sent_text: str, doc_sent) -> tuple[list[str], list[dict]]:
     """
     flags = []
 
-    if _NUMERIC_RE.search(sent_text):
+    if _NUMERIC_RE.search(_numeric_check_text(sent_text)):
         flags.append("numeric")
 
     if _CAUSAL_RE.search(sent_text):
