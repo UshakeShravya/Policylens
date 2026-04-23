@@ -13,6 +13,7 @@ from src.retriever import chunk_pages, build_index
 from src.agent import verify_claims_with_agent
 from src.reporter import generate_report, report_to_dataframe
 from src.index_store import is_cached_upload, is_cached
+from src.batch import batch_audit, compare_reports
 
 # Must be the very first Streamlit call
 st.set_page_config(
@@ -449,6 +450,159 @@ def show_audit() -> None:
         )
 
 
+def _display_batch_results(reports: list[dict], comparison: dict) -> None:
+    riskiest = comparison["overall_riskiest_document"]
+    safest   = comparison["overall_safest_document"]
+
+    # Top metrics
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Documents Audited", len(reports))
+    c2.metric("Total Claims", comparison["total_claims_across_all"])
+    c3.metric("Total High-Risk Failures", comparison["total_high_risk_across_all"])
+
+    # Comparison table
+    st.markdown("### Comparison Table")
+    if riskiest:
+        st.error(f"Riskiest: **{riskiest}** — highest silent failure rate")
+    if safest and safest != riskiest:
+        st.success(f"Safest: **{safest}** — lowest silent failure rate")
+
+    valid_docs = [d for d in comparison["documents"] if not d["error"]]
+    if valid_docs:
+        comp_df = pd.DataFrame([
+            {
+                "Document":            d["document_name"],
+                "Claims":              d["total_claims"],
+                "High-Risk":           d["high_risk_count"],
+                "Silent Failure Rate": f"{d['silent_failure_rate']:.1%}",
+                "Unsupported Rate":    f"{d['unsupported_rate']:.1%}",
+            }
+            for d in valid_docs
+        ])
+
+        def _highlight_riskiest(row):
+            if row["Document"] == riskiest:
+                return [
+                    "background-color: #ffcccc; color: #b71c1c; font-weight: bold"
+                ] * len(row)
+            return [""] * len(row)
+
+        st.dataframe(
+            comp_df.style.apply(_highlight_riskiest, axis=1),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    for d in comparison["documents"]:
+        if d["error"]:
+            st.error(f"{d['document_name']}: {d['error']}")
+
+    # Per-document detail
+    st.markdown("### Per-Document Detail")
+    for i, report in enumerate(reports):
+        if report.get("error"):
+            continue
+        doc_name = report.get("document_name", f"Document {i + 1}")
+        is_riskiest = doc_name == riskiest
+        counts = report["verdict_counts"]
+
+        with st.expander(
+            f"{'[HIGH RISK]  ' if is_riskiest else ''}{doc_name}",
+            expanded=is_riskiest,
+        ):
+            mc1, mc2, mc3, mc4 = st.columns(4)
+            mc1.metric("Supported",          counts["Supported"])
+            mc2.metric("Partially Supported", counts["Partially Supported"])
+            mc3.metric("Unsupported",         counts["Unsupported"])
+            mc4.metric("High-Risk",           counts["High-Risk Silent Failure"])
+
+            if report["summary_table"]:
+                df_detail = report_to_dataframe(report)
+                st.dataframe(
+                    _style_dataframe(df_detail),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+            st.download_button(
+                label=f"Download {doc_name} Report (JSON)",
+                data=json.dumps(report, indent=2, ensure_ascii=False),
+                file_name=f"policylens_{doc_name}.json",
+                mime="application/json",
+                key=f"batch_dl_{i}",
+            )
+
+
+def show_batch() -> None:
+    st.title("Batch Audit")
+    st.caption("Audit and compare multiple policy documents in one run")
+
+    # Input grid — 3 columns, one document per column
+    cols = st.columns(3)
+    uploaded_pairs: list[tuple] = []  # (pdf_file, summary_text)
+
+    for i, col in enumerate(cols, 1):
+        with col:
+            st.subheader(f"Document {i}")
+            pdf = st.file_uploader(
+                f"PDF {i}",
+                type=["pdf"],
+                key=f"batch_pdf_{i}",
+                label_visibility="collapsed",
+            )
+            summary = st.text_area(
+                f"Summary {i}",
+                height=160,
+                placeholder="Paste AI summary (optional — leave blank to self-audit)",
+                key=f"batch_summary_{i}",
+                label_visibility="collapsed",
+            )
+            if pdf is not None:
+                uploaded_pairs.append((pdf, summary))
+
+    st.divider()
+    run_clicked = st.button(
+        "Run Batch Audit",
+        type="primary",
+        disabled=len(uploaded_pairs) == 0,
+        use_container_width=True,
+    )
+
+    if run_clicked and uploaded_pairs:
+        temp_paths: list[str] = []
+        try:
+            original_names = [pdf.name for pdf, _ in uploaded_pairs]
+            for pdf, _ in uploaded_pairs:
+                temp_paths.append(_save_uploaded_pdf(pdf))
+            final_summaries = [s for _, s in uploaded_pairs]
+
+            with st.spinner(f"Auditing {len(uploaded_pairs)} document(s) in parallel..."):
+                reports = batch_audit(temp_paths, final_summaries, document_names=original_names)
+                comparison = compare_reports(reports)
+
+            st.session_state.batch_reports    = reports
+            st.session_state.batch_comparison = comparison
+        except Exception as exc:
+            st.error(f"Batch audit error: {exc}")
+        finally:
+            for p in temp_paths:
+                try:
+                    os.unlink(p)
+                except Exception:
+                    pass
+
+    if st.session_state.batch_comparison is not None:
+        _display_batch_results(
+            st.session_state.batch_reports,
+            st.session_state.batch_comparison,
+        )
+    elif not run_clicked:
+        st.info(
+            "Upload up to 3 policy PDFs above (and optionally paste an AI-generated "
+            "summary for each), then click **Run Batch Audit**."
+        )
+
+
 def show_about() -> None:
     st.title("About PolicyLens")
     st.markdown("""
@@ -532,7 +686,7 @@ Target for the MVP: < 5 %
 # ---------------------------------------------------------------------------
 
 # Session state — initialise once per browser session
-for _key in ("results", "report"):
+for _key in ("results", "report", "batch_reports", "batch_comparison"):
     if _key not in st.session_state:
         st.session_state[_key] = None
 
@@ -541,12 +695,14 @@ with st.sidebar:
     st.markdown("## PolicyLens")
     _mode = st.radio(
         "Navigation",
-        ["Audit Document", "About"],
+        ["Audit Document", "Batch Audit", "About"],
         label_visibility="collapsed",
     )
     st.divider()
 
 if _mode == "About":
     show_about()
+elif _mode == "Batch Audit":
+    show_batch()
 else:
     show_audit()
