@@ -13,7 +13,8 @@
       "Bash(curl *)",
       "Bash(streamlit run *)",
       "Bash(pkill -f \"streamlit run app.py\")",
-      "Bash(pkill -f \"streamlit run\")"
+      "Bash(pkill -f \"streamlit run\")",
+      "Bash(pip show *)"
     ]
   }
 }

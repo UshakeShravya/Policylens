@@ -14,6 +14,7 @@ from src.agent import verify_claims_with_agent
 from src.reporter import generate_report, report_to_dataframe
 from src.index_store import is_cached_upload, is_cached
 from src.batch import batch_audit, compare_reports
+from src.config import MAX_UPLOAD_MB
 
 # Must be the very first Streamlit call
 st.set_page_config(
@@ -64,7 +65,18 @@ _DISPLAY_COLS = {
 # ---------------------------------------------------------------------------
 
 def _save_uploaded_pdf(uploaded_file) -> str:
-    """Write a Streamlit UploadedFile to a named temp file; return the path."""
+    """
+    Write a Streamlit UploadedFile to a named temp file and return the path.
+
+    Raises ValueError if the file exceeds MAX_UPLOAD_MB.
+    """
+    size_mb = len(uploaded_file.getbuffer()) / (1024 * 1024)
+    if size_mb > MAX_UPLOAD_MB:
+        raise ValueError(
+            f"{uploaded_file.name} is {size_mb:.1f} MB — "
+            f"maximum upload size is {MAX_UPLOAD_MB} MB. "
+            "Try compressing the PDF or splitting it into sections."
+        )
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as f:
         f.write(uploaded_file.getbuffer())
         return f.name
@@ -95,10 +107,20 @@ def _run_pipeline(source_path: str, summary_text: str):
         if not pages:
             st.error(
                 "No text could be extracted from the PDF. "
-                "The file may be scanned or image-based."
+                "The file may be scanned or image-based. "
+                "Try a PDF with a text layer, or paste the text directly into the summary box."
             )
             return None, None
-        bar.progress(15, text=f"Parsed {len(pages)} pages — extracting claims & building index...")
+
+        cached = is_cached(source_path)
+        time_hint = (
+            "Index cached — this run will be fast."
+            if cached
+            else f"Large document ({len(pages)} pages) — expect 2–4 minutes."
+            if len(pages) > 50
+            else f"Parsed {len(pages)} pages — should complete in under 2 minutes."
+        )
+        bar.progress(15, text=time_hint)
 
         # 2 — Determine claim source
         if summary_text.strip():
@@ -143,9 +165,21 @@ def _run_pipeline(source_path: str, summary_text: str):
         bar.empty()
         return results, report
 
+    except ValueError as exc:
+        bar.empty()
+        st.error(str(exc))
+        return None, None
+    except FileNotFoundError as exc:
+        bar.empty()
+        st.error(f"File not found — the uploaded PDF may have been cleaned up. Please re-upload. ({exc})")
+        return None, None
     except Exception as exc:
         bar.empty()
-        st.error(f"Pipeline error: {exc}")
+        st.error(
+            f"Audit failed: {exc}\n\n"
+            "If this persists, check that your ANTHROPIC_API_KEY is set and has credits, "
+            "and that poppler is installed for multimodal extraction."
+        )
         return None, None
 
 
@@ -274,6 +308,42 @@ def _render_charts(report: dict) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Claim detail renderer (reused across High-Risk and Unsupported sections)
+# ---------------------------------------------------------------------------
+
+def _render_claim_detail(r: dict, *, expanded: bool) -> None:
+    """Render a single claim's full detail inside a collapsible expander."""
+    preview = r["claim_text"][:75] + "..." if len(r["claim_text"]) > 75 else r["claim_text"]
+    with st.expander(f"Claim {r['claim_id']} — {preview}", expanded=expanded):
+        st.markdown("**Claim text**")
+        st.info(r["claim_text"])
+
+        if r.get("evidence"):
+            top = r["evidence"][0]
+            st.markdown(
+                f"**Top retrieved evidence** "
+                f"*(similarity: {top['similarity_score']:.3f} · p.{top['page_number']})*"
+            )
+            st.success(top["text"])
+
+        st.markdown("**Risk explanation**")
+        st.warning(r["risk_explanation"])
+
+        left, right = st.columns(2)
+        rules = r.get("rules_triggered", [])
+        left.markdown(
+            "**Rules triggered:** "
+            + ("`" + "`, `".join(rules) + "`" if rules else "_none_")
+        )
+        right.markdown(f"**Confidence score:** `{r['confidence_score']:.4f}`")
+
+        agent_notes = r.get("agent_notes", "")
+        if agent_notes:
+            st.markdown("**Agent notes**")
+            st.info(agent_notes)
+
+
+# ---------------------------------------------------------------------------
 # Results renderer (shared between fresh run and cached state)
 # ---------------------------------------------------------------------------
 
@@ -321,38 +391,18 @@ def _display_results(report: dict) -> None:
             "that cannot be found or verified in any retrieved passage."
         )
         for r in high_risk:
-            preview = (
-                r["claim_text"][:75] + "..."
-                if len(r["claim_text"]) > 75
-                else r["claim_text"]
-            )
-            with st.expander(f"Claim {r['claim_id']} — {preview}", expanded=True):
-                st.markdown("**Claim text**")
-                st.info(r["claim_text"])
+            _render_claim_detail(r, expanded=True)
 
-                if r.get("evidence"):
-                    top = r["evidence"][0]
-                    st.markdown(
-                        f"**Top retrieved evidence** "
-                        f"*(similarity: {top['similarity_score']:.3f} · p.{top['page_number']})*"
-                    )
-                    st.success(top["text"])
-
-                st.markdown("**Risk explanation**")
-                st.warning(r["risk_explanation"])
-
-                left, right = st.columns(2)
-                rules = r["rules_triggered"]
-                left.markdown(
-                    f"**Rules triggered:** "
-                    + ("`" + "`, `".join(rules) + "`" if rules else "_none_")
-                )
-                right.markdown(f"**Confidence score:** `{r['confidence_score']:.4f}`")
-
-                agent_notes = r.get("agent_notes", "")
-                if agent_notes:
-                    st.markdown("**Agent notes**")
-                    st.info(agent_notes)
+    # — Unsupported claims with agent notes —
+    unsupported_with_notes = [
+        r for r in (report.get("summary_table") or [])
+        if r.get("verdict") == "Unsupported" and r.get("agent_notes")
+    ]
+    if unsupported_with_notes:
+        st.markdown(f"### Unsupported Claims — Agent Analysis &nbsp;({len(unsupported_with_notes)})")
+        st.caption("No relevant source passage was found. The agent investigated and left notes below.")
+        for r in unsupported_with_notes:
+            _render_claim_detail(r, expanded=False)
 
     # — Download —
     st.divider()
@@ -376,7 +426,7 @@ def show_audit() -> None:
     with st.sidebar:
         st.header("Source Document")
         source_pdf = st.file_uploader(
-            "Upload the policy document (PDF)",
+            f"Upload the policy document (PDF, max {MAX_UPLOAD_MB} MB)",
             type=["pdf"],
             key="source_pdf",
         )

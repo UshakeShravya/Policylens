@@ -101,9 +101,10 @@ def _extract_numbers(text: str) -> list[float]:
 
 def _numbers_match(claim_nums: list[float], evidence_nums: list[float]) -> bool:
     """
-    Return True if at least one claim number appears in evidence within
-    ±NUMERIC_TOLERANCE (relative).  Year-like integers (1800–2100) are
-    compared exactly to avoid false positives from the wide tolerance window.
+    Return True if at least one claim number appears in evidence within ±NUMERIC_TOLERANCE.
+
+    Year-like integers in the range 1800–2100 are compared exactly to prevent the
+    ±10% window from matching nearby years (e.g. 2020 ≈ 2022 would be a false pass).
     """
     def _is_year(n: float) -> bool:
         return n == int(n) and 1800 <= n <= 2100
@@ -123,7 +124,13 @@ def _numbers_match(claim_nums: list[float], evidence_nums: list[float]) -> bool:
 
 
 def _missing_key_entities(raw_entities: list[dict], evidence_text: str) -> list[str]:
-    """Return entity texts (key labels only) absent from evidence."""
+    """
+    Return the text of key entities from the claim that are absent from evidence.
+
+    Only checks entity labels in _KEY_ENTITY_LABELS (ORG, GPE, PERSON, LOC, LAW).
+    Numeric labels (PERCENT, MONEY, QUANTITY) are handled separately by Rule 2.
+    Matching is case-insensitive substring search.
+    """
     evidence_lower = evidence_text.lower()
     return [
         e["text"]

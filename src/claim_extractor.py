@@ -8,6 +8,8 @@ from difflib import SequenceMatcher
 
 import spacy
 
+from src.config import EXTRACTION_MODEL, VISION_MODEL
+
 _NUMERIC_RE = re.compile(
     r"""
     \b\d[\d,]*\.?\d*\s*%          # percentages: 22%, 3.5%
@@ -271,7 +273,7 @@ def extract_claims_with_llm(pages: list[dict]) -> list[dict]:
         # --- LLM second pass with prompt caching on the system block ---
         try:
             response = client.messages.create(
-                model="claude-opus-4-7",
+                model=EXTRACTION_MODEL,
                 max_tokens=1024,
                 system=[
                     {
@@ -435,7 +437,7 @@ def extract_claims_from_images(pdf_path: str) -> list[dict]:
 
         try:
             response = client.messages.create(
-                model="claude-sonnet-4-20250514",
+                model=VISION_MODEL,
                 max_tokens=1024,
                 system=_MULTIMODAL_SYSTEM_PROMPT,
                 messages=[

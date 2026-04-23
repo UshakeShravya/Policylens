@@ -1,8 +1,17 @@
 """
-tests/test_pipeline.py — Unit tests for all five PolicyLens core modules.
+tests/test_pipeline.py — Unit tests for all PolicyLens core modules.
 
 Run directly:   python tests/test_pipeline.py
 Run via module: python -m unittest tests.test_pipeline -v
+
+Test classes:
+  TestParser         — PDF text extraction
+  TestClaimExtractor — Claim flagging logic
+  TestRetriever      — FAISS index and retrieval
+  TestVerifier       — 4-rule deterministic engine
+  TestReporter       — Report aggregation
+  TestAgent          — Agent tool dispatch and escalation logic
+  TestIndexStore     — FAISS persistent cache
 """
 
 import os
@@ -356,6 +365,193 @@ class TestReporter(unittest.TestCase):
         df = report_to_dataframe(report)
         self.assertIsInstance(df, pd.DataFrame)
         self.assertEqual(len(df), len(self._MOCK_RESULTS))
+
+
+# ============================================================
+# 6. TestAgent
+# ============================================================
+
+class TestAgent(unittest.TestCase):
+    """Tests for src.agent — tool dispatch and escalation gating."""
+
+    def _make_index_chunks(self):
+        """Return a tiny real FAISS index and chunks for dispatch tests."""
+        from src.retriever import chunk_pages, build_index
+        pages = [{"page_number": 1, "text": (
+            "Emissions declined during the review period covering 2018 to 2022. "
+            "The Environmental Protection Agency monitored air quality. "
+            "No single cause was identified for the observed reduction."
+        )}]
+        chunks = chunk_pages(pages, chunk_size=3)
+        index, chunks = build_index(chunks)
+        return index, chunks
+
+    def _make_claim(self, verdict_override=None):
+        return {
+            "claim_id": 1,
+            "text": "The policy reduced emissions by 22% over five years.",
+            "page_number": 1,
+            "flags": ["numeric", "causal_verb"],
+            "raw_entities": [],
+            "detection_method": "regex",
+        }
+
+    def test_escalation_skips_supported_claims(self):
+        """verify_claims_with_agent must not call the API for Supported claims."""
+        from src.agent import verify_claims_with_agent
+        # Claim with no numeric/causal flags — deterministic engine will return Supported
+        safe_claim = {
+            "claim_id": 99,
+            "text": "Federal agencies coordinate environmental monitoring.",
+            "page_number": 1,
+            "flags": [],
+            "raw_entities": [],
+            "detection_method": "regex",
+        }
+        index, chunks = self._make_index_chunks()
+        with patch("src.agent._run_agent_loop") as mock_loop:
+            results = verify_claims_with_agent([safe_claim], index, chunks)
+            # Agent loop must not be called for a safe claim
+            mock_loop.assert_not_called()
+        self.assertEqual(len(results), 1)
+
+    def test_escalation_calls_agent_for_high_risk(self):
+        """verify_claims_with_agent must call the agent for numeric-mismatch claims."""
+        from src.agent import verify_claims_with_agent
+        index, chunks = self._make_index_chunks()
+        risky_claim = self._make_claim()
+        mock_verdict = {
+            "verdict": "High-Risk Silent Failure",
+            "confidence_score": 0.05,
+            "reasoning": "Numeric value 22% not found in source.",
+            "agent_notes": "Source only confirms a decline, no percentage given.",
+        }
+        with patch("src.agent._run_agent_loop", return_value=mock_verdict) as mock_loop:
+            with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-test-key"}):
+                with patch("anthropic.Anthropic"):
+                    results = verify_claims_with_agent([risky_claim], index, chunks)
+        mock_loop.assert_called_once()
+        self.assertEqual(len(results), 1)
+
+    def test_agent_fallback_on_api_error(self):
+        """If the agent loop raises, result must still be a valid verdict dict."""
+        from src.agent import verify_claims_with_agent
+        index, chunks = self._make_index_chunks()
+        risky_claim = self._make_claim()
+        with patch("src.agent._run_agent_loop", side_effect=RuntimeError("API down")):
+            with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-test-key"}):
+                with patch("anthropic.Anthropic"):
+                    results = verify_claims_with_agent([risky_claim], index, chunks)
+        self.assertEqual(len(results), 1)
+        r = results[0]
+        self.assertIn("verdict", r)
+        self.assertIn("confidence_score", r)
+
+    def test_build_verdict_preserves_evidence(self):
+        """_build_verdict must carry evidence from the base deterministic result."""
+        from src.agent import _build_verdict
+        index, chunks = self._make_index_chunks()
+        claim = self._make_claim()
+        # Pre-compute base so we can inspect it
+        from src.retriever import retrieve_evidence
+        from src.verifier import verify_claim
+        evidence = retrieve_evidence(claim["text"], index, chunks, top_k=3)
+        base = verify_claim(claim, evidence)
+        base["agent_notes"] = ""
+        agent_result = {
+            "verdict": "High-Risk Silent Failure",
+            "confidence_score": 0.04,
+            "reasoning": "No numeric match found.",
+            "agent_notes": "Source has no percentage value.",
+        }
+        merged = _build_verdict(agent_result, claim, index, chunks, base=base)
+        self.assertIn("evidence", merged)
+        self.assertEqual(merged["agent_notes"], "Source has no percentage value.")
+        self.assertIn("+agent", merged["detection_method"])
+
+    def test_retry_helper_retries_on_rate_limit(self):
+        """_api_call_with_retry must retry up to API_MAX_RETRIES times."""
+        import anthropic
+        from src.agent import _api_call_with_retry
+        from src.config import API_MAX_RETRIES
+        call_count = {"n": 0}
+
+        def flaky_fn():
+            call_count["n"] += 1
+            if call_count["n"] <= API_MAX_RETRIES:
+                raise anthropic.RateLimitError(
+                    message="rate limited",
+                    response=MagicMock(status_code=429, headers={}),
+                    body={},
+                )
+            return "ok"
+
+        with patch("time.sleep"):  # don't actually sleep in tests
+            result = _api_call_with_retry(flaky_fn)
+        self.assertEqual(result, "ok")
+        self.assertEqual(call_count["n"], API_MAX_RETRIES + 1)
+
+
+# ============================================================
+# 7. TestIndexStore
+# ============================================================
+
+class TestIndexStore(unittest.TestCase):
+    """Tests for src.index_store — cache hit/miss behavior."""
+
+    def setUp(self):
+        import tempfile
+        self._tmpdir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self._tmpdir, ignore_errors=True)
+
+    def test_save_and_load_roundtrip(self):
+        """save_index followed by load_index must return an equivalent index."""
+        import numpy as np
+        import faiss
+        from src.index_store import save_index, load_index, _CACHE_DIR
+        from src.retriever import chunk_pages, build_index
+        import tempfile, os
+
+        pages = [{"page_number": 1, "text": "The agency monitored emissions across twelve states."}]
+        chunks = chunk_pages(pages, chunk_size=3)
+        index, chunks = build_index(chunks)
+
+        # Write a fake PDF to get an md5 key
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf", dir=self._tmpdir) as f:
+            f.write(b"%PDF-1.4 fake content for cache key")
+            pdf_path = f.name
+
+        try:
+            save_index(index, chunks, pdf_path)
+            result = load_index(pdf_path)
+            self.assertIsNotNone(result)
+            loaded_index, loaded_chunks = result
+            self.assertEqual(loaded_index.ntotal, index.ntotal)
+            self.assertEqual(len(loaded_chunks), len(chunks))
+        finally:
+            os.unlink(pdf_path)
+
+    def test_load_returns_none_on_cache_miss(self):
+        """load_index must return None when no cache exists for a PDF."""
+        from src.index_store import load_index
+        import tempfile, os
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf", dir=self._tmpdir) as f:
+            f.write(b"%PDF-1.4 no cached index for this")
+            pdf_path = f.name
+        try:
+            result = load_index(pdf_path)
+            self.assertIsNone(result)
+        finally:
+            os.unlink(pdf_path)
+
+    def test_is_cached_upload_false_for_unknown_bytes(self):
+        """is_cached_upload must return False for bytes that were never cached."""
+        from src.index_store import is_cached_upload
+        result = is_cached_upload(b"some random pdf bytes that were never indexed")
+        self.assertFalse(result)
 
 
 # ============================================================

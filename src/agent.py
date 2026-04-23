@@ -16,10 +16,19 @@ import json
 import os
 import re
 import sys
+import time
 import warnings
 
-_MODEL = "claude-sonnet-4-6"
-_MAX_TURNS = 6
+from src.config import (
+    AGENT_MODEL,
+    AGENT_MAX_TURNS,
+    AGENT_MAX_WORKERS,
+    API_MAX_RETRIES,
+    API_RETRY_BASE_S,
+)
+
+_MODEL     = AGENT_MODEL
+_MAX_TURNS = AGENT_MAX_TURNS
 
 # Only these verdicts warrant the extra cost of a full agent loop.
 _ESCALATION_VERDICTS = {"High-Risk Silent Failure", "Unsupported"}
@@ -28,6 +37,47 @@ _ESCALATION_VERDICTS = {"High-Risk Silent Failure", "Unsupported"}
 def _log(msg: str) -> None:
     """Write a timestamped agent debug line to stderr (always visible in the terminal)."""
     print(f"[AGENT] {msg}", file=sys.stderr, flush=True)
+
+
+def _api_call_with_retry(fn, *args, **kwargs):
+    """
+    Call an Anthropic API function with exponential-backoff retry.
+
+    Retries on RateLimitError (429) and InternalServerError (529 / overloaded).
+    All other exceptions propagate immediately.
+
+    Parameters
+    ----------
+    fn : callable
+        The API method to call (e.g. client.messages.create).
+    *args, **kwargs
+        Forwarded verbatim to fn.
+
+    Returns
+    -------
+    The return value of fn(*args, **kwargs) on success.
+
+    Raises
+    ------
+    The last exception if all retries are exhausted.
+    """
+    try:
+        import anthropic as _anthropic
+        _retryable = (_anthropic.RateLimitError, _anthropic.InternalServerError)
+    except ImportError:
+        _retryable = ()
+
+    last_exc = None
+    for attempt in range(API_MAX_RETRIES + 1):
+        try:
+            return fn(*args, **kwargs)
+        except _retryable as exc:
+            last_exc = exc
+            if attempt < API_MAX_RETRIES:
+                delay = API_RETRY_BASE_S * (2 ** attempt)
+                _log(f"retry {attempt + 1}/{API_MAX_RETRIES} after {delay:.1f}s ({type(exc).__name__})")
+                time.sleep(delay)
+    raise last_exc
 
 
 # ---------------------------------------------------------------------------
@@ -258,7 +308,8 @@ def _run_agent_loop(
     _log(f"claim={claim['claim_id']} starting loop | {claim['text'][:70]}")
 
     for turn in range(_MAX_TURNS):
-        response = client.messages.create(
+        response = _api_call_with_retry(
+            client.messages.create,
             model=_MODEL,
             max_tokens=1024,
             system=[
@@ -494,7 +545,7 @@ def verify_claims_with_agent(
         return i, _build_verdict(agent_result, claim, index, chunks, base=base)
 
     results = list(det_results)  # copy; non-escalated slots stay as-is
-    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=AGENT_MAX_WORKERS) as pool:
         future_to_idx = {pool.submit(_run_one, i): i for i in escalate}
         for future in concurrent.futures.as_completed(future_to_idx):
             original_i = future_to_idx[future]

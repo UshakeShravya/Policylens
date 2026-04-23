@@ -3,12 +3,15 @@ import numpy as np
 import spacy
 from sentence_transformers import SentenceTransformer
 
-_MODEL_NAME = "all-MiniLM-L6-v2"
+from src.config import EMBEDDING_MODEL
+
+_MODEL_NAME = EMBEDDING_MODEL
 _model: SentenceTransformer | None = None
 _nlp = None
 
 
 def _get_model() -> SentenceTransformer:
+    """Lazy-load and cache the sentence-transformers model (thread-safe via GIL)."""
     global _model
     if _model is None:
         _model = SentenceTransformer(_MODEL_NAME)
@@ -16,6 +19,7 @@ def _get_model() -> SentenceTransformer:
 
 
 def _get_nlp():
+    """Lazy-load and cache the spaCy pipeline with only the sentencizer enabled."""
     global _nlp
     if _nlp is None:
         # Only sentence segmentation needed here — disable heavier components
@@ -24,8 +28,18 @@ def _get_nlp():
 
 
 def _sentencize(text: str) -> list[str]:
+    """Split text into sentences using spaCy, filtering blank results."""
     doc = _get_nlp()(text)
     return [s.text.strip() for s in doc.sents if s.text.strip()]
+
+
+def _embed(texts: list[str]) -> np.ndarray:
+    """Return L2-normalised float32 embeddings for cosine similarity via IndexFlatIP."""
+    model = _get_model()
+    embeddings = model.encode(texts, convert_to_numpy=True, show_progress_bar=False)
+    embeddings = embeddings.astype(np.float32)
+    faiss.normalize_L2(embeddings)
+    return embeddings
 
 
 def chunk_pages(pages: list[dict], chunk_size: int = 3) -> list[dict]:
@@ -71,13 +85,6 @@ def chunk_pages(pages: list[dict], chunk_size: int = 3) -> list[dict]:
     return chunks
 
 
-def _embed(texts: list[str]) -> np.ndarray:
-    """Return L2-normalised embeddings (float32) for cosine similarity via IndexFlatIP."""
-    model = _get_model()
-    embeddings = model.encode(texts, convert_to_numpy=True, show_progress_bar=False)
-    embeddings = embeddings.astype(np.float32)
-    faiss.normalize_L2(embeddings)
-    return embeddings
 
 
 def build_index(
