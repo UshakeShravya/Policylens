@@ -3,7 +3,7 @@ sentence-transformers==5.4.0
 faiss-cpu==1.13.2
 anthropic==0.96.0
 streamlit==1.45.1
-spacy==3.8.14
+spacy>=3.7.0,<4.0.0
 pandas==2.2.3
 numpy==2.1.3
 python-dotenv==1.1.0
