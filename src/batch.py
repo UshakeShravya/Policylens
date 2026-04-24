@@ -41,18 +41,25 @@ def _audit_one(pdf_path: str, summary_text: str, document_name: str | None = Non
     if not pages:
         return _empty_report(doc_name, "No text could be extracted from the PDF.")
 
+    using_summary = bool(summary_text.strip())
     claim_pages = (
         [{"page_number": 1, "text": summary_text}]
-        if summary_text.strip()
+        if using_summary
         else pages
     )
+    # Only scan source pages visually when claims come from the source itself.
+    # Pasted summaries have no visual elements; running Vision on the source
+    # would extract source-side claims that trivially verify against themselves.
+    run_multimodal = not using_summary
 
     def _build():
         c = chunk_pages(pages, chunk_size=3)
         return build_index(c, pdf_path=pdf_path)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
-        claims_future = pool.submit(extract_claims_full, pdf_path, claim_pages)
+        claims_future = pool.submit(
+            extract_claims_full, pdf_path, claim_pages, run_multimodal
+        )
         index_future  = pool.submit(_build)
         claims        = claims_future.result()
         index, chunks = index_future.result()

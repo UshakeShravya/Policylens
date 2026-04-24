@@ -51,3 +51,8 @@ EMBEDDING_MODEL: str = "all-MiniLM-L6-v2"
 
 # Maximum PDF upload size in megabytes
 MAX_UPLOAD_MB: int = 50
+
+# Maximum pages passed to the Vision API for multimodal claim extraction.
+# Charts and figures are densest in the first ~20 pages of policy documents;
+# scanning the full document would cost hundreds of API calls on large PDFs.
+MULTIMODAL_MAX_PAGES: int = 20

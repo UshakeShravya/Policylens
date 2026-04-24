@@ -14,7 +14,7 @@ from src.agent import verify_claims_with_agent
 from src.reporter import generate_report, report_to_dataframe
 from src.index_store import is_cached_upload, is_cached
 from src.batch import batch_audit, compare_reports
-from src.config import MAX_UPLOAD_MB
+from src.config import MAX_UPLOAD_MB, MULTIMODAL_MAX_PAGES
 
 # Must be the very first Streamlit call
 st.set_page_config(
@@ -126,23 +126,34 @@ def _run_pipeline(source_path: str, summary_text: str):
         if summary_text.strip():
             claim_pages = [{"page_number": 1, "text": summary_text}]
             source_label = "the pasted summary"
+            # Pasted text has no visual elements — multimodal would scan the
+            # source PDF and extract source-side claims that verify themselves.
+            use_multimodal = False
         else:
             claim_pages = pages
             source_label = "the source document (no summary provided)"
+            use_multimodal = True
 
-        # 3 — Parallel: multimodal claim extraction + FAISS index build
+        # 3 — Parallel: claim extraction + FAISS index build
         index_msg = (
             "Loading cached index..." if is_cached(source_path)
             else "Building retrieval index..."
         )
-        bar.progress(20, text=f"Extracting claims (text + visual) · {index_msg}")
+        extraction_msg = (
+            f"Extracting claims (text + visual first {MULTIMODAL_MAX_PAGES} pages)"
+            if use_multimodal
+            else "Extracting claims (text + LLM)"
+        )
+        bar.progress(20, text=f"{extraction_msg} · {index_msg}")
 
         def _build_index():
             c = chunk_pages(pages, chunk_size=3)
             return build_index(c, pdf_path=source_path)
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
-            claims_future = pool.submit(extract_claims_full, source_path, claim_pages)
+            claims_future = pool.submit(
+                extract_claims_full, source_path, claim_pages, use_multimodal
+            )
             index_future  = pool.submit(_build_index)
             claims        = claims_future.result()
             index, chunks = index_future.result()

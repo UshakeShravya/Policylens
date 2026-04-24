@@ -8,7 +8,7 @@ from difflib import SequenceMatcher
 
 import spacy
 
-from src.config import EXTRACTION_MODEL, VISION_MODEL
+from src.config import EXTRACTION_MODEL, VISION_MODEL, MULTIMODAL_MAX_PAGES
 
 _NUMERIC_RE = re.compile(
     r"""
@@ -420,10 +420,17 @@ def extract_claims_from_images(pdf_path: str) -> list[dict]:
         return []
 
     try:
-        images = convert_from_path(pdf_path)
+        images = convert_from_path(pdf_path, last_page=MULTIMODAL_MAX_PAGES)
     except Exception as exc:
         warnings.warn(f"pdf2image could not convert {pdf_path!r}: {exc}", stacklevel=2)
         return []
+
+    if len(images) == MULTIMODAL_MAX_PAGES:
+        warnings.warn(
+            f"Multimodal extraction capped at {MULTIMODAL_MAX_PAGES} pages "
+            f"(set MULTIMODAL_MAX_PAGES in src/config.py to change).",
+            stacklevel=2,
+        )
 
     client = anthropic.Anthropic(api_key=api_key)
     all_claims: list[dict] = []
@@ -488,17 +495,26 @@ def extract_claims_from_images(pdf_path: str) -> list[dict]:
     return all_claims
 
 
-def extract_claims_full(pdf_path: str, pages: list[dict]) -> list[dict]:
+def extract_claims_full(
+    pdf_path: str,
+    pages: list[dict],
+    run_multimodal: bool = True,
+) -> list[dict]:
     """
-    Run both LLM-assisted text extraction and multimodal image extraction,
+    Run LLM-assisted text extraction and optionally multimodal image extraction,
     then merge and deduplicate results.
 
     Parameters
     ----------
     pdf_path : str
-        Path to the source PDF — used for image conversion.
+        Path to the source PDF — used for image conversion when run_multimodal=True.
     pages : list[dict]
-        Output of parser.extract_text_from_pdf — used for text extraction.
+        Pages whose text is the claim source (summary or source document).
+    run_multimodal : bool
+        Whether to run the Vision pass on pdf_path.  Pass False when claims
+        come from a pasted text summary — there are no visual elements to scan,
+        and scanning the source PDF would extract source-side claims that
+        trivially verify against themselves.
 
     Returns
     -------
@@ -508,7 +524,7 @@ def extract_claims_full(pdf_path: str, pages: list[dict]) -> list[dict]:
         Claims found by both text and image passes are marked "both".
     """
     llm_claims   = extract_claims_with_llm(pages)
-    image_claims = extract_claims_from_images(pdf_path)
+    image_claims = extract_claims_from_images(pdf_path) if run_multimodal else []
 
     if not image_claims:
         return llm_claims
