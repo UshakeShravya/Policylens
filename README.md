@@ -2,6 +2,9 @@
 
 A skeptical verification system for AI-generated policy analysis. PolicyLens detects silent hallucination and logical overreach in policy documents by auditing claims against their source evidence — claim by claim, not fluency by fluency.
 
+**Live site:** https://ushakeshravya.github.io/Policylens/  
+**Course:** INFO 7375 — Prompt Engineering & AI, Northeastern University
+
 ## What It Does
 
 PolicyLens does not generate summaries. It **audits** them.
