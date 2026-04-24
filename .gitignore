@@ -21,7 +21,7 @@ venv/
 # Evaluation run outputs
 /eval/runs/
 
-# PDFs — keep .gitkeep placeholders, skip actual documents
+# PDFs — exclude all except the two small sample documents graders need
 *.pdf
-!data/sample/*.pdf
-data/sample/*.pdf
+!data/sample/epa-fy-2020-annual-report.pdf
+!data/sample/federal-budget-2022.pdf

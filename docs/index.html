@@ -1071,31 +1071,31 @@
     <span class="section-label">Evaluation</span>
     <h2 class="section-title">Measured against ground truth</h2>
     <p class="section-sub">
-      System verdicts were compared to 15 manually annotated claims drawn from
-      three public policy documents, using Cohen's Kappa and standard
-      classification metrics.
+      System verdicts on an EPA audit were compared to manually annotated ground
+      truth using Cohen's Kappa and standard classification metrics
+      (eval/evaluate.py against eval/policylens_report.json).
     </p>
 
     <div class="metrics">
-      <div class="metric-card metric-card--green">
-        <div class="metric-value">0%</div>
-        <div class="metric-label">False Negative Rate</div>
-        <div class="metric-note">Real ChatGPT summary audit</div>
+      <div class="metric-card metric-card--yellow">
+        <div class="metric-value">50%</div>
+        <div class="metric-label">Accuracy</div>
+        <div class="metric-note">Claim classification (n=4)</div>
       </div>
       <div class="metric-card metric-card--accent">
-        <div class="metric-value">80%</div>
-        <div class="metric-label">Silent Failure Detection</div>
-        <div class="metric-note">Fabricated summary audit</div>
-      </div>
-      <div class="metric-card metric-card--yellow">
-        <div class="metric-value">0.41</div>
+        <div class="metric-value">0.33</div>
         <div class="metric-label">Cohen's Kappa</div>
-        <div class="metric-note">vs. human annotations (n=15)</div>
+        <div class="metric-note">Fair inter-rater agreement</div>
+      </div>
+      <div class="metric-card metric-card--accent">
+        <div class="metric-value">25%</div>
+        <div class="metric-label">False Negative Rate</div>
+        <div class="metric-note">Missed problematic claims</div>
       </div>
       <div class="metric-card metric-card--muted">
-        <div class="metric-value">15</div>
-        <div class="metric-label">Claims Annotated</div>
-        <div class="metric-note">Across 3 policy documents</div>
+        <div class="metric-value">4</div>
+        <div class="metric-label">Claims Evaluated</div>
+        <div class="metric-note">EPA audit corpus</div>
       </div>
     </div>
   </div>
