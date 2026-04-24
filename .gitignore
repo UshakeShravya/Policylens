@@ -25,3 +25,4 @@ venv/
 *.pdf
 !data/sample/epa-fy-2020-annual-report.pdf
 !data/sample/federal-budget-2022.pdf
+data/sample/*.pdf
