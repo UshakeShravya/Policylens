@@ -1,6 +1,6 @@
 # PolicyLens: AI-Powered Hallucination Detection for Policy Documents
 
-**Course:** INFO 5100 — Application Engineering and Development (Generative AI)  
+**Course:** INFO 7375 — Prompt Engineering & AI  
 **Instructor:** Northeastern University  
 **Student:** Shravya Ushake  
 **Date:** April 2026  
@@ -338,4 +338,4 @@ policylens/
 
 ---
 
-*PolicyLens was built as a course project for INFO 5100 at Northeastern University. All evaluation metrics are computed from real system runs against manually annotated data. No metrics in this document are fabricated or estimated.*
+*PolicyLens was built as a course project for INFO 7375 — Prompt Engineering & AI at Northeastern University. All evaluation metrics are computed from real system runs against manually annotated data. No metrics in this document are fabricated or estimated.*
